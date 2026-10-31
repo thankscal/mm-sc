@@ -652,11 +652,10 @@
         noti.classList.remove('show');
     }
 
-    // ---------- 解析 Excel（顧客機維護組格式）----------
+    // ---------- 解析 Excel（改良版：先找人員列，再往下找班型列）----------
     function parseWorkbook(workbook, fileName) {
         scheduleData = []; allDates = [];
         
-        // 優先找 CUST-xx 工作表，否則用第一個
         let targetSheetName = workbook.SheetNames.find(n => /^CUST-\d+$/i.test(n)) || workbook.SheetNames[0];
         if (!targetSheetName) {
             showError('找不到工作表');
@@ -671,7 +670,7 @@
             return;
         }
         
-        // 從標題列讀取年月，例如 A1=2026年、B1=11月
+        // 從標題列讀取年月
         let year = 2026, month = 11;
         let a1 = json[0] && json[0][0] ? String(json[0][0]).trim() : '';
         let b1 = json[0] && json[0][1] ? String(json[0][1]).trim() : '';
@@ -679,7 +678,6 @@
         let mm = b1.match(/(\d{1,2})/);
         if (ym) year = parseInt(ym[1]);
         if (mm) month = parseInt(mm[1]);
-        // 若標題讀不到，嘗試從工作表名 CUST-11 讀月份
         if (!mm) {
             let sm = targetSheetName.match(/CUST-(\d{1,2})/i);
             if (sm) month = parseInt(sm[1]);
@@ -688,73 +686,106 @@
         scheduleMonth = month;
         
         const daysInMonth = new Date(scheduleYear, scheduleMonth, 0).getDate();
-        // C 欄 = 索引 2，對應 1 日；最後日期欄 = 2 + daysInMonth - 1
         const maxCol = 2 + daysInMonth - 1;
+        
+        let pendingPerson = null;   // 等待配對班型列的人員物件
+        let pendingMarks = {};      // 人員列上的標記
         
         for (let r = 0; r < json.length; r++) {
             let row = json[r];
-            if (!row || row.length < 2) continue;
+            if (!row) continue;
             
-            let empId = row[0] !== null && row[0] !== undefined ? String(row[0]).trim() : '';
-            if (!/^\d+$/.test(empId)) continue;
+            let empIdRaw = row[0];
+            let nameRaw = row[1];
+            let empId = (empIdRaw !== null && empIdRaw !== undefined) ? String(empIdRaw).trim() : '';
+            let name = (nameRaw !== null && nameRaw !== undefined) ? String(nameRaw).trim() : '';
             
-            let name = row[1] !== null && row[1] !== undefined ? String(row[1]).trim() : '';
-            if (!isValidPersonName(name)) continue;
-            
-            // 下一列為班型列
-            let baseRow = json[r + 1] || [];
-            let shifts = {};
-            let hasData = false;
-            
-            for (let c = 2; c <= maxCol; c++) {
-                let dateNum = c - 1;
-                if (dateNum < 1 || dateNum > daysInMonth) continue;
-                
-                let markRaw = row[c];
-                let baseRaw = baseRow[c];
-                let mark = (markRaw !== null && markRaw !== undefined && String(markRaw).trim() !== '') ? String(markRaw).trim() : '';
-                let base = (baseRaw !== null && baseRaw !== undefined && String(baseRaw).trim() !== '') ? String(baseRaw).trim() : '';
-                if (mark.startsWith('=')) mark = '';
-                if (base.startsWith('=')) base = '';
-                
-                let shiftCode = '';
-                let note = '';
-                
-                // 「代」保留為備註，班型仍用下一列；其他標記（AL、福、O、受訓、体A、体L、L…）優先覆蓋
-                if (mark === '代') {
-                    shiftCode = base || '代';
-                    note = base ? '代' : '';
-                } else if (mark) {
-                    shiftCode = mark;
-                    note = '';
-                } else {
-                    shiftCode = base;
-                }
-                
-                if (shiftCode) {
-                    shifts[dateNum] = {
-                        shift: shiftCode,
-                        originalShift: shiftCode,
-                        isHoliday: holidayShifts.includes(shiftCode),
-                        note: note
-                    };
-                    hasData = true;
-                }
-            }
-            
-            if (hasData) {
-                scheduleData.push({
+            // 判斷是否為人員列
+            if (/^\d+$/.test(empId) && isValidPersonName(name)) {
+                // 若前一個 pendingPerson 還沒配到班型列，先忽略（或可用其人員列自身日期欄當班型，但通常不會）
+                pendingPerson = {
                     name: name,
                     empId: empId,
                     group: '顧客機維護組',
                     category: '所有人',
-                    shifts: shifts,
+                    shifts: {},
                     mainNote: ''
-                });
+                };
+                pendingMarks = {};
+                for (let c = 2; c <= maxCol; c++) {
+                    let v = row[c];
+                    if (v !== null && v !== undefined) {
+                        let s = String(v).trim();
+                        if (s !== '' && !s.startsWith('=')) {
+                            pendingMarks[c] = s;
+                        }
+                    }
+                }
+                continue;
             }
             
-            // 跳過下一列班型列
-            r++;
+            // 非人員列：若目前有 pendingPerson，檢查是否為班型列
+            if (pendingPerson) {
+                let isShiftRow = !/^\d+$/.test(empId) && (name === '' || name === null || name === undefined);
+                if (isShiftRow) {
+                    // 日期欄至少要有一些內容，才視為班型列
+                    let hasAny = false;
+                    for (let c = 2; c <= maxCol; c++) {
+                        let v = row[c];
+                        if (v !== null && v !== undefined) {
+                            let s = String(v).trim();
+                            if (s !== '' && !s.startsWith('=')) { hasAny = true; break; }
+                        }
+                    }
+                    if (hasAny) {
+                        let shifts = {};
+                        let hasData = false;
+                        for (let c = 2; c <= maxCol; c++) {
+                            let dateNum = c - 1;
+                            if (dateNum < 1 || dateNum > daysInMonth) continue;
+                            
+                            let base = '';
+                            if (row[c] !== null && row[c] !== undefined) {
+                                base = String(row[c]).trim();
+                                if (base.startsWith('=')) base = '';
+                            }
+                            let mark = pendingMarks[c] || '';
+                            
+                            let shiftCode = '';
+                            let note = '';
+                            
+                            // 合併規則：
+                            // 「代」→ 班型用班型列，備註為「代」
+                            // 其他人員列標記（AL、福、O、受訓、体A、体L、L…）優先覆蓋班型列
+                            if (mark === '代') {
+                                shiftCode = base || '代';
+                                note = base ? '代' : '';
+                            } else if (mark) {
+                                shiftCode = mark;
+                                note = '';
+                            } else {
+                                shiftCode = base;
+                            }
+                            
+                            if (shiftCode) {
+                                shifts[dateNum] = {
+                                    shift: shiftCode,
+                                    originalShift: shiftCode,
+                                    isHoliday: holidayShifts.includes(shiftCode),
+                                    note: note
+                                };
+                                hasData = true;
+                            }
+                        }
+                        if (hasData) {
+                            pendingPerson.shifts = shifts;
+                            scheduleData.push(pendingPerson);
+                        }
+                        pendingPerson = null;
+                        pendingMarks = {};
+                    }
+                }
+            }
         }
         
         if (scheduleData.length === 0) {
