@@ -70,6 +70,9 @@
         .modal-header, .modal-footer { border-color: #e0d5b5; }
         .alert-secondary { background-color: #ffffff !important; border: 1px solid #dee2e6; color: #2c3e50; }
         .person-main-note { font-size: 0.85rem; color: #555; margin-top: 8px; padding: 8px 12px; background-color: #fff9ef; border-radius: 8px; border-left: 3px solid #ffc107; }
+        .parse-summary-row { display: flex; justify-content: space-between; padding: 5px 8px; border-bottom: 1px solid #eee; font-size: 0.82rem; gap: 8px; }
+        .parse-summary-row strong { min-width: 70px; }
+        .parse-summary-row .shifts { color: #666; text-align: right; }
     </style>
 </head>
 <body>
@@ -89,6 +92,16 @@
     </div></div>
     <div class="loading-spinner" id="loadingSpinner"><div class="spinner-border text-primary"><span class="visually-hidden">載入中...</span></div><h4 class="mt-3">解析班表中...</h4></div>
     <div class="result-section" id="resultSection">
+        <div class="card" id="parseSummaryCard" style="display:none;">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="mb-0"><i class="bi bi-list-check"></i> 解析摘要 <span id="parseSummaryCount" class="badge bg-primary"></span></h5>
+                    <button class="btn btn-sm btn-outline-secondary" id="toggleParseSummaryBtn"><i class="bi bi-chevron-up"></i> 隱藏</button>
+                </div>
+                <div id="parseSummaryList" style="max-height:220px;overflow-y:auto;"></div>
+                <div class="small text-muted mt-2"><i class="bi bi-info-circle"></i> 請核對每個人 1 日與月底班型是否與原始檔一致。</div>
+            </div>
+        </div>
         <div class="color-settings-section" id="colorSettingsSection">
             <div class="d-flex justify-content-between"><h5><i class="bi bi-palette"></i> 班型顏色設定</h5><button class="btn btn-sm btn-outline-secondary" id="toggleColorSettingsBtn"><i class="bi bi-chevron-up"></i> 隱藏</button></div>
             <div id="colorSettingsContainer"></div>
@@ -164,26 +177,13 @@
     };
     const SPECIAL_DEFAULT_COLOR = { r: 255, g: 192, b: 203 };
     
-    let scheduleData = [], allDates = [], currentFileName = '';
+    let scheduleData = [], currentFileName = '';
     let shiftColors = { ...defaultShiftColors };
     let scheduleYear = 2026, scheduleMonth = 11, weekStartDay = 0;
     let isSummaryCollapsed = true;
     let globalSpecialShifts = new Set();
 
     // ---------- 班次時間工具 ----------
-    function getShiftTimeMinutes(shiftCode, type) {
-        const desc = shiftDescriptions[shiftCode];
-        if (!desc || !desc.includes('~')) return null;
-        let timeStr = desc.split('~')[type === 'start' ? 0 : 1].trim();
-        let [hour, minute] = timeStr.split(':').map(Number);
-        let minutes = hour * 60 + minute;
-        if (type === 'end') {
-            let start = getShiftTimeMinutes(shiftCode, 'start');
-            if (start !== null && minutes < start) minutes += 1440;
-        }
-        return minutes;
-    }
-    
     function getShiftStartMinutes(shiftCode) {
         if (holidayShifts.includes(shiftCode)) return 99999;
         const desc = shiftDescriptions[shiftCode];
@@ -294,15 +294,14 @@
         for(let s of workShiftsList) workTotal+=shiftCounts[s];
         for(let s of companyList) companyTotal+=shiftCounts[s];
         for(let s of personalList) personalTotal+=shiftCounts[s];
-        function appendShiftItem(shift,cnt,showDesc=true){
+        function appendShiftItem(shift,cnt){
             if(cnt===0) return;
             let color=shiftColors[shift]||{r:128,g:128,b:128};
             let item=document.createElement('div');
             item.className='summary-item';
             item.style.borderLeftColor=`rgb(${color.r},${color.g},${color.b})`;
             let desc=shiftDescriptions[shift]||(globalSpecialShifts.has(shift)?'特殊班型':'');
-            let displayText=showDesc?`${shift} ${desc}`:shift;
-            item.innerHTML=`<span class="summary-shift">${displayText}</span><span class="summary-count">${cnt} 天</span>`;
+            item.innerHTML=`<span class="summary-shift">${shift} ${desc}</span><span class="summary-count">${cnt} 天</span>`;
             container.appendChild(item);
         }
         if(workShiftsList.length){
@@ -310,14 +309,14 @@
             workTitle.className='summary-section-title';
             workTitle.innerHTML=`📋 上班：共 ${workTotal} 天`;
             container.appendChild(workTitle);
-            for(let s of workShiftsList) appendShiftItem(s,shiftCounts[s],true);
+            for(let s of workShiftsList) appendShiftItem(s,shiftCounts[s]);
         }
         if(companyList.length){
             let companyTitle=document.createElement('div');
             companyTitle.className='summary-section-title';
             companyTitle.innerHTML=`🏢 放假 (公司的假)：共 ${companyTotal} 天`;
             container.appendChild(companyTitle);
-            for(let s of companyList) appendShiftItem(s,shiftCounts[s],true);
+            for(let s of companyList) appendShiftItem(s,shiftCounts[s]);
         }
         if(companyList.length&&personalList.length){
             let divider=document.createElement('div');
@@ -329,7 +328,7 @@
             personalTitle.className='summary-section-title';
             personalTitle.innerHTML=`👤 放假 (自己的假)：共 ${personalTotal} 天`;
             container.appendChild(personalTitle);
-            for(let s of personalList) appendShiftItem(s,shiftCounts[s],true);
+            for(let s of personalList) appendShiftItem(s,shiftCounts[s]);
         }
         if(workShiftsList.length===0&&companyList.length===0&&personalList.length===0){
             let emptyMsg=document.createElement('div');
@@ -406,7 +405,7 @@
         let currentNote = (personData.shifts[dateNum] && personData.shifts[dateNum].note) ? personData.shifts[dateNum].note : '';
         let maxNoteLength = 30;
         let remaining = maxNoteLength - currentNote.length;
-        let modalHtml = `<div class="modal fade" id="shiftModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">修改 ${scheduleYear}/${scheduleMonth}/${dateNum} 班型與備註</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" style="max-height:400px;overflow-y:auto;"><div class="d-flex flex-wrap gap-2" id="shiftOptionsContainer"></div><div class="mt-3"><label class="form-label">備註 (最多${maxNoteLength}字，會顯示在日期格子內)</label><textarea class="form-control modal-note-input" id="noteInput" rows="2" placeholder="例如：會議、請假、出差..." maxlength="${maxNoteLength}">${escapeHtml(currentNote)}</textarea><div class="text-end mt-1"><small id="noteRemaining" class="text-muted">剩餘 ${remaining} 字</small></div></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" id="saveNoteBtn">儲存備註</button></div></div></div></div>`;
+        let modalHtml = `<div class="modal fade" id="shiftModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">修改 ${scheduleYear}/${scheduleMonth}/${dateNum} 班型與備註</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" style="max-height:400px;overflow-y:auto;"><div class="d-flex flex-wrap gap-2" id="shiftOptionsContainer"></div><div class="mt-3"><label class="form-label">備註 (最多${maxNoteLength}字)</label><textarea class="form-control modal-note-input" id="noteInput" rows="2" placeholder="例如：會議、請假、出差..." maxlength="${maxNoteLength}">${escapeHtml(currentNote)}</textarea><div class="text-end mt-1"><small id="noteRemaining" class="text-muted">剩餘 ${remaining} 字</small></div></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" class="btn btn-primary" id="saveNoteBtn">儲存備註</button></div></div></div></div>`;
         let existingModal = document.getElementById('shiftModal'); if(existingModal) existingModal.remove();
         document.body.insertAdjacentHTML('beforeend', modalHtml); let modalElem = document.getElementById('shiftModal');
         let bsModal = new bootstrap.Modal(modalElem);
@@ -534,9 +533,7 @@
         if(!name) return;
         let container = document.createElement('div');
         container.style.position='fixed'; container.style.left='-9999px'; container.style.top='-9999px';
-        container.style.width='1000px';
-        container.style.backgroundColor='#fdf8e7';
-        container.style.padding='30px';
+        container.style.width='1000px'; container.style.backgroundColor='#fdf8e7'; container.style.padding='30px';
         const style = document.createElement('style');
         style.textContent = `.download-table{width:100%;table-layout:fixed;border-collapse:collapse;background:#fdf8e7}.download-table th,.download-table td{width:14.2857%!important}.download-table th{border:1px solid #ddd;padding:12px;background:#4361ee;color:white}.download-table td.has-data{border:1px solid #ddd;padding:12px;vertical-align:top;text-align:center;background:#fff9ef}.download-date{font-weight:bold;font-size:1.2rem;margin-bottom:5px}.download-shift{font-weight:600;display:flex;justify-content:center;gap:6px;align-items:center}.download-time{font-size:0.7rem;color:#555}.download-note{font-size:0.6rem;color:#FF69B4;background:#fff;border-radius:8px;padding:2px 4px;margin-top:4px}`;
         container.appendChild(style);
@@ -567,8 +564,7 @@
                         td.style.backgroundColor=`rgba(${col.r},${col.g},${col.b},0.25)`;
                         let shiftDiv=document.createElement('div'); shiftDiv.className='download-shift';
                         let codeSpan=document.createElement('span'); codeSpan.textContent=sd.shift;
-                        shiftDiv.appendChild(codeSpan);
-                        td.appendChild(shiftDiv);
+                        shiftDiv.appendChild(codeSpan); td.appendChild(shiftDiv);
                         if(shiftDescriptions[sd.shift]){
                             let timeDiv=document.createElement('div'); timeDiv.className='download-time'; timeDiv.textContent=shiftDescriptions[sd.shift];
                             td.appendChild(timeDiv);
@@ -616,61 +612,48 @@
         weekdaysShort.forEach(day=>{let ds=document.createElement('div'); ds.style.fontWeight='bold'; ds.style.fontSize='11px'; ds.style.color='#4361ee'; ds.style.padding='4px 0'; ds.style.backgroundColor='#f0f3ff'; ds.style.borderRadius='12px'; ds.textContent=day; weekRow.appendChild(ds);});
         cardDiv.appendChild(weekRow);
         const grid=document.createElement('div'); grid.style.display='grid'; grid.style.gridTemplateColumns='repeat(7,1fr)'; grid.style.gap='4px'; grid.style.marginBottom='20px';
-        for(let i=0;i<startEmpty;i++){let ec=document.createElement('div'); ec.style.backgroundColor='#fdf8e7'; ec.style.borderRadius='0'; ec.style.padding='0'; ec.style.height='auto'; grid.appendChild(ec);}
+        for(let i=0;i<startEmpty;i++){let ec=document.createElement('div'); ec.style.backgroundColor='#fdf8e7'; ec.style.height='auto'; grid.appendChild(ec);}
         for(let d=1;d<=daysInMonth;d++){
             const sd=person.shifts[d];
             const shiftCode=sd?sd.shift:'';
             const bgColorObj=sd?(shiftColors[sd.shift]||{r:240,g:240,b:240}):{r:248,g:249,b:250};
-            const bgRgba=`rgba(${bgColorObj.r}, ${bgColorObj.g}, ${bgColorObj.b}, 0.45)`;
-            const cell=document.createElement('div'); cell.style.backgroundColor=bgRgba; cell.style.borderRadius='10px'; cell.style.padding='6px 0 5px 0'; cell.style.textAlign='center';
+            const cell=document.createElement('div'); cell.style.backgroundColor=`rgba(${bgColorObj.r},${bgColorObj.g},${bgColorObj.b},0.45)`; cell.style.borderRadius='10px'; cell.style.padding='6px 0 5px 0'; cell.style.textAlign='center';
             const dateSpan=document.createElement('div'); dateSpan.style.fontSize='14px'; dateSpan.style.fontWeight='700'; dateSpan.style.color='#2c3e50'; dateSpan.textContent=d; cell.appendChild(dateSpan);
             if(shiftCode){
-                const shiftSpan=document.createElement('div'); shiftSpan.style.display='flex'; shiftSpan.style.justifyContent='center'; shiftSpan.style.alignItems='center'; shiftSpan.style.gap='4px';
-                shiftSpan.style.fontSize='10px'; shiftSpan.style.fontWeight='600'; shiftSpan.style.marginTop='2px'; shiftSpan.style.color='#1e466e';
-                shiftSpan.innerHTML=`<span>${shiftCode.length>5?shiftCode.substring(0,5):shiftCode}</span>`;
-                cell.appendChild(shiftSpan);
-                if(sd && shiftDescriptions[sd.shift]){ let ts=document.createElement('div'); ts.style.fontSize='6px'; ts.style.color='#6c757d'; ts.style.marginTop='1px'; ts.textContent=shiftDescriptions[sd.shift]; cell.appendChild(ts); }
-                if(sd.note&&sd.note.trim()){ let ns=document.createElement('div'); ns.style.fontSize='6px'; ns.style.color='#FF69B4'; ns.style.backgroundColor='#ffffff'; ns.style.borderRadius='6px'; ns.style.padding='1px 2px'; ns.style.marginTop='2px'; ns.textContent=sd.note.length>12?sd.note.substring(0,12)+'…':sd.note; cell.appendChild(ns); }
-            } else { let dash=document.createElement('div'); dash.style.fontSize='9px'; dash.style.marginTop='2px'; dash.style.color='#adb5bd'; dash.textContent='—'; cell.appendChild(dash); }
+                const shiftSpan=document.createElement('div'); shiftSpan.style.fontSize='10px'; shiftSpan.style.fontWeight='600'; shiftSpan.style.marginTop='2px'; shiftSpan.style.color='#1e466e';
+                shiftSpan.textContent = shiftCode.length>5?shiftCode.substring(0,5):shiftCode; cell.appendChild(shiftSpan);
+                if(sd && shiftDescriptions[sd.shift]){ let ts=document.createElement('div'); ts.style.fontSize='6px'; ts.style.color='#6c757d'; ts.textContent=shiftDescriptions[sd.shift]; cell.appendChild(ts); }
+                if(sd.note&&sd.note.trim()){ let ns=document.createElement('div'); ns.style.fontSize='6px'; ns.style.color='#FF69B4'; ns.style.backgroundColor='#ffffff'; ns.style.borderRadius='6px'; ns.style.padding='1px 2px'; ns.textContent=sd.note.length>12?sd.note.substring(0,12)+'…':sd.note; cell.appendChild(ns); }
+            } else { let dash=document.createElement('div'); dash.style.fontSize='9px'; dash.style.color='#adb5bd'; dash.textContent='—'; cell.appendChild(dash); }
             grid.appendChild(cell);
         }
         cardDiv.appendChild(grid);
         const statsDiv=document.createElement('div'); statsDiv.style.backgroundColor='#f1f5fe'; statsDiv.style.borderRadius='16px'; statsDiv.style.padding='8px 12px'; statsDiv.style.display='flex'; statsDiv.style.justifyContent='space-between'; statsDiv.style.fontWeight='600'; statsDiv.style.fontSize='11px';
         statsDiv.innerHTML=`<div style="color:#2b6e3c;">📆 上班 ${workDays}天</div><div style="color:#c92a2a;">🌙 休假 ${holidayDays}天</div><div style="color:#4361ee;">📅 總日 ${workDays+holidayDays}天</div>`;
         cardDiv.appendChild(statsDiv);
-        const footerNote=document.createElement('div'); footerNote.style.textAlign='center'; footerNote.style.fontSize='6px'; footerNote.style.color='#adb5bd'; footerNote.style.marginTop='12px'; footerNote.textContent='顧客機維護組專用-班表小助手';
-        cardDiv.appendChild(footerNote);
         document.body.appendChild(cardDiv);
         let cardCanvas=await html2canvas(cardDiv,{scale:2.5,backgroundColor:'#fdf8e7'});
         document.body.removeChild(cardDiv);
         const wallpaperCanvas=document.createElement('canvas'); wallpaperCanvas.width=1080; wallpaperCanvas.height=1920;
         const ctx=wallpaperCanvas.getContext('2d'); ctx.fillStyle='#fdf8e7'; ctx.fillRect(0,0,1080,1920);
         const targetCardWidth=1080*0.70; const scale=targetCardWidth/cardCanvas.width; const targetCardHeight=cardCanvas.height*scale;
-        const x=(1080-targetCardWidth)/2; const y=(1920-targetCardHeight)/2;
-        ctx.drawImage(cardCanvas,0,0,cardCanvas.width,cardCanvas.height,x,y,targetCardWidth,targetCardHeight);
+        ctx.drawImage(cardCanvas,0,0,cardCanvas.width,cardCanvas.height,(1080-targetCardWidth)/2,(1920-targetCardHeight)/2,targetCardWidth,targetCardHeight);
         wallpaperCanvas.toBlob(blob=>{let url=URL.createObjectURL(blob); let a=document.createElement('a'); a.download=`${name}_${scheduleYear}年${scheduleMonth}月_桌布.png`; a.href=url; a.click(); URL.revokeObjectURL(url); noti.classList.remove('show');},'image/png');
         noti.classList.remove('show');
     }
 
-    // ---------- 解析 Excel（改良版：先找人員列，再往下找班型列）----------
+    // ---------- 解析 Excel（改良：人員列索引 + 限制範圍找班型列）----------
     function parseWorkbook(workbook, fileName) {
-        scheduleData = []; allDates = [];
+        scheduleData = [];
         
         let targetSheetName = workbook.SheetNames.find(n => /^CUST-\d+$/i.test(n)) || workbook.SheetNames[0];
-        if (!targetSheetName) {
-            showError('找不到工作表');
-            return;
-        }
+        if (!targetSheetName) { showError('找不到工作表'); return; }
         
         const sheet = workbook.Sheets[targetSheetName];
         let json = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (json.length < 5) { showError('工作表資料太少，請確認格式'); return; }
         
-        if (json.length < 5) {
-            showError('工作表資料太少，請確認格式');
-            return;
-        }
-        
-        // 從標題列讀取年月
+        // 年月
         let year = 2026, month = 11;
         let a1 = json[0] && json[0][0] ? String(json[0][0]).trim() : '';
         let b1 = json[0] && json[0][1] ? String(json[0][1]).trim() : '';
@@ -678,124 +661,105 @@
         let mm = b1.match(/(\d{1,2})/);
         if (ym) year = parseInt(ym[1]);
         if (mm) month = parseInt(mm[1]);
-        if (!mm) {
-            let sm = targetSheetName.match(/CUST-(\d{1,2})/i);
-            if (sm) month = parseInt(sm[1]);
-        }
-        scheduleYear = year;
-        scheduleMonth = month;
+        if (!mm) { let sm = targetSheetName.match(/CUST-(\d{1,2})/i); if (sm) month = parseInt(sm[1]); }
+        scheduleYear = year; scheduleMonth = month;
         
-        const daysInMonth = new Date(scheduleYear, scheduleMonth, 0).getDate();
+        const daysInMonth = new Date(year, month, 0).getDate();
         const maxCol = 2 + daysInMonth - 1;
         
-        let pendingPerson = null;   // 等待配對班型列的人員物件
-        let pendingMarks = {};      // 人員列上的標記
-        
+        // 1. 找出所有人員列
+        let personRows = [];
         for (let r = 0; r < json.length; r++) {
             let row = json[r];
             if (!row) continue;
-            
-            let empIdRaw = row[0];
-            let nameRaw = row[1];
-            let empId = (empIdRaw !== null && empIdRaw !== undefined) ? String(empIdRaw).trim() : '';
-            let name = (nameRaw !== null && nameRaw !== undefined) ? String(nameRaw).trim() : '';
-            
-            // 判斷是否為人員列
+            let empId = row[0] != null ? String(row[0]).trim() : '';
+            let name = row[1] != null ? String(row[1]).trim() : '';
             if (/^\d+$/.test(empId) && isValidPersonName(name)) {
-                // 若前一個 pendingPerson 還沒配到班型列，先忽略（或可用其人員列自身日期欄當班型，但通常不會）
-                pendingPerson = {
-                    name: name,
-                    empId: empId,
-                    group: '顧客機維護組',
-                    category: '所有人',
-                    shifts: {},
-                    mainNote: ''
-                };
-                pendingMarks = {};
-                for (let c = 2; c <= maxCol; c++) {
-                    let v = row[c];
-                    if (v !== null && v !== undefined) {
-                        let s = String(v).trim();
-                        if (s !== '' && !s.startsWith('=')) {
-                            pendingMarks[c] = s;
-                        }
-                    }
-                }
-                continue;
-            }
-            
-            // 非人員列：若目前有 pendingPerson，檢查是否為班型列
-            if (pendingPerson) {
-                let isShiftRow = !/^\d+$/.test(empId) && (name === '' || name === null || name === undefined);
-                if (isShiftRow) {
-                    // 日期欄至少要有一些內容，才視為班型列
-                    let hasAny = false;
-                    for (let c = 2; c <= maxCol; c++) {
-                        let v = row[c];
-                        if (v !== null && v !== undefined) {
-                            let s = String(v).trim();
-                            if (s !== '' && !s.startsWith('=')) { hasAny = true; break; }
-                        }
-                    }
-                    if (hasAny) {
-                        let shifts = {};
-                        let hasData = false;
-                        for (let c = 2; c <= maxCol; c++) {
-                            let dateNum = c - 1;
-                            if (dateNum < 1 || dateNum > daysInMonth) continue;
-                            
-                            let base = '';
-                            if (row[c] !== null && row[c] !== undefined) {
-                                base = String(row[c]).trim();
-                                if (base.startsWith('=')) base = '';
-                            }
-                            let mark = pendingMarks[c] || '';
-                            
-                            let shiftCode = '';
-                            let note = '';
-                            
-                            // 合併規則：
-                            // 「代」→ 班型用班型列，備註為「代」
-                            // 其他人員列標記（AL、福、O、受訓、体A、体L、L…）優先覆蓋班型列
-                            if (mark === '代') {
-                                shiftCode = base || '代';
-                                note = base ? '代' : '';
-                            } else if (mark) {
-                                shiftCode = mark;
-                                note = '';
-                            } else {
-                                shiftCode = base;
-                            }
-                            
-                            if (shiftCode) {
-                                shifts[dateNum] = {
-                                    shift: shiftCode,
-                                    originalShift: shiftCode,
-                                    isHoliday: holidayShifts.includes(shiftCode),
-                                    note: note
-                                };
-                                hasData = true;
-                            }
-                        }
-                        if (hasData) {
-                            pendingPerson.shifts = shifts;
-                            scheduleData.push(pendingPerson);
-                        }
-                        pendingPerson = null;
-                        pendingMarks = {};
-                    }
-                }
+                personRows.push({ r, empId, name });
             }
         }
         
-        if (scheduleData.length === 0) {
-            showError('無效班表資料，請確認格式（找不到任何人名與班型）');
-            return;
+        // 2. 對每個人員列，限制在「自己與下一人之間」找班型列
+        let usedShiftRows = new Set();
+        for (let i = 0; i < personRows.length; i++) {
+            let { r, empId, name } = personRows[i];
+            let limit = (i + 1 < personRows.length) ? personRows[i + 1].r : json.length;
+            
+            let marks = {};
+            let personRow = json[r];
+            for (let c = 2; c <= maxCol; c++) {
+                let v = personRow[c];
+                if (v != null) {
+                    let s = String(v).trim();
+                    if (s !== '' && !s.startsWith('=')) marks[c] = s;
+                }
+            }
+            
+            let shiftRow = null, shiftRowIdx = -1;
+            for (let rr = r + 1; rr < limit; rr++) {
+                let row = json[rr];
+                if (!row || usedShiftRows.has(rr)) continue;
+                let a = row[0] != null ? String(row[0]).trim() : '';
+                if (/^\d+$/.test(a)) continue; // 不是班型列
+                let hasShift = false;
+                for (let c = 2; c <= maxCol; c++) {
+                    let v = row[c];
+                    if (v != null) {
+                        let s = String(v).trim();
+                        if (s !== '' && !s.startsWith('=')) { hasShift = true; break; }
+                    }
+                }
+                if (hasShift) { shiftRow = row; shiftRowIdx = rr; break; }
+            }
+            
+            if (!shiftRow) { console.warn('找不到班型列：', name, empId); continue; }
+            usedShiftRows.add(shiftRowIdx);
+            
+            let shifts = {};
+            for (let c = 2; c <= maxCol; c++) {
+                let dateNum = c - 1;
+                if (dateNum < 1 || dateNum > daysInMonth) continue;
+                
+                let base = '';
+                if (shiftRow[c] != null) {
+                    base = String(shiftRow[c]).trim();
+                    if (base.startsWith('=')) base = '';
+                }
+                let mark = marks[c] || '';
+                
+                let shiftCode = '', note = '';
+                if (mark === '代') {
+                    shiftCode = base || '代';
+                    note = base ? '代' : '';
+                } else if (mark) {
+                    shiftCode = mark;
+                } else {
+                    shiftCode = base;
+                }
+                
+                if (shiftCode) {
+                    shifts[dateNum] = { shift: shiftCode, originalShift: shiftCode, isHoliday: holidayShifts.includes(shiftCode), note: note };
+                }
+            }
+            
+            if (Object.keys(shifts).length > 0) {
+                scheduleData.push({ name, empId, group: '顧客機維護組', category: '所有人', shifts, mainNote: '' });
+            } else {
+                console.warn('班型列無有效班型：', name, empId);
+            }
         }
+        
+        console.log('解析結果：', scheduleData.map(p => ({
+            name: p.name, empId: p.empId, 天數: Object.keys(p.shifts).length,
+            第一天: p.shifts[1]?.shift, 最後一天: p.shifts[daysInMonth]?.shift
+        })));
+        
+        if (scheduleData.length === 0) { showError('無效班表資料，請確認格式'); return; }
         
         refreshSpecialShiftsFromData();
         updatePersonSelect();
         updateWeekStartSelector();
+        showParseSummary();
         hideLoading();
         document.getElementById('fileInfo').style.display = 'none';
         
@@ -806,14 +770,28 @@
         }
     }
     
+    function showParseSummary() {
+        const card = document.getElementById('parseSummaryCard');
+        const list = document.getElementById('parseSummaryList');
+        const count = document.getElementById('parseSummaryCount');
+        if (!card || !list) return;
+        card.style.display = 'block';
+        count.textContent = `${scheduleData.length} 人`;
+        const daysInMonth = new Date(scheduleYear, scheduleMonth, 0).getDate();
+        list.innerHTML = scheduleData.map(p => {
+            let days = Object.keys(p.shifts).length;
+            let first = p.shifts[1]?.shift || '-';
+            let last = p.shifts[daysInMonth]?.shift || '-';
+            return `<div class="parse-summary-row"><span><strong>${p.name}</strong> (${p.empId})</span><span class="shifts">${days} 天｜1日:${first}｜${daysInMonth}日:${last}</span></div>`;
+        }).join('');
+    }
+    
     function isValidPersonName(name) {
         if (!name || typeof name !== 'string') return false;
         let trimmed = name.trim();
         if (trimmed.length < 2) return false;
-        const invalidKeywords = ['姓名', 'Name', '人員', '星期', '週', '週次', '序號', '編號', 'No.', 'NO.', '員工', '人員編號', '日期', 'DAY', 'Day', '天數', '日期/姓名', '日期/人員', '組長', '領班', '早班', '中班', '晚班', '地裝', '行政', 'QC', '補給庫房', '直接人力', '人力需求', '可休假', '班別', '班型', '代領班', '早班人力', '中班人力', '晚班人力', '人力需求員額', '可休假人力', '主管', '總數', '休假', '上課', '病假', '出席人數'];
-        for (let kw of invalidKeywords) {
-            if (trimmed.includes(kw)) return false;
-        }
+        const invalidKeywords = ['姓名','Name','人員','星期','週','週次','序號','編號','No.','NO.','員工','人員編號','日期','DAY','Day','天數','日期/姓名','日期/人員','組長','領班','早班','中班','晚班','地裝','行政','QC','補給庫房','直接人力','人力需求','可休假','班別','班型','代領班','早班人力','中班人力','晚班人力','人力需求員額','可休假人力','主管','總數','休假','上課','病假','出席人數'];
+        for (let kw of invalidKeywords) if (trimmed.includes(kw)) return false;
         if (/^星期[一二三四五六日]$/.test(trimmed)) return false;
         if (/^週[一二三四五六日]$/.test(trimmed)) return false;
         if (/^\d+$/.test(trimmed)) return false;
@@ -828,7 +806,7 @@
         scheduleData.forEach(p => {
             const opt = document.createElement('option');
             opt.value = p.name;
-            opt.textContent = p.name;
+            opt.textContent = `${p.name} (${p.empId})`;
             sel.appendChild(opt);
         });
     }
@@ -838,10 +816,7 @@
         wSel.style.display='block';
         let select=document.getElementById('weekStartDaySelect');
         select.value=weekStartDay;
-        select.onchange=()=>{
-            weekStartDay=parseInt(select.value);
-            showSelectedPersonSchedule();
-        };
+        select.onchange=()=>{ weekStartDay=parseInt(select.value); showSelectedPersonSchedule(); };
     }
     function showLoading(){ document.getElementById('loadingSpinner').style.display='block'; document.getElementById('resultSection').style.display='none'; }
     function hideLoading(){ document.getElementById('loadingSpinner').style.display='none'; document.getElementById('resultSection').style.display='block'; }
@@ -862,8 +837,7 @@
         btn.innerHTML = '<i class="bi bi-clipboard"></i> 複製本頁代碼';
         btn.className = 'float-copy-btn';
         btn.onclick = () => {
-            let code = document.documentElement.outerHTML;
-            navigator.clipboard.writeText(code).then(() => {
+            navigator.clipboard.writeText(document.documentElement.outerHTML).then(() => {
                 let noti = document.getElementById('copyNotification');
                 noti.classList.add('show');
                 setTimeout(() => noti.classList.remove('show'), 1500);
@@ -877,14 +851,16 @@
         
         const togglePanel=()=>{ 
             let panel=document.getElementById('colorSettingsSection'); 
-            if(panel.style.display==='block') {
-                panel.style.display='none';
-            } else {
-                panel.style.display='block';
-            }
+            panel.style.display = (panel.style.display==='block') ? 'none' : 'block';
         };
         document.getElementById('toggleColorSettingsBtn').onclick=togglePanel; 
         document.getElementById('toggleColorSettingsBtn2').onclick=togglePanel;
+        document.getElementById('toggleParseSummaryBtn').onclick=()=>{
+            let list = document.getElementById('parseSummaryList');
+            let btn = document.getElementById('toggleParseSummaryBtn');
+            if (list.style.display === 'none') { list.style.display = 'block'; btn.innerHTML = '<i class="bi bi-chevron-up"></i> 隱藏'; }
+            else { list.style.display = 'none'; btn.innerHTML = '<i class="bi bi-chevron-down"></i> 展開'; }
+        };
         
         document.getElementById('fileInput').addEventListener('change',(e)=>{ if(e.target.files&&e.target.files[0]) handleFile(e.target.files[0]); e.target.value=''; });
         document.getElementById('selectFileBtn').onclick=()=>document.getElementById('fileInput').click();
