@@ -63,12 +63,6 @@ body{background:#fdf8e7;font-family:'Segoe UI','Microsoft JhengHei',sans-serif;p
 .modal-header,.modal-footer{border-color:#e0d5b5}
 .alert-secondary{background:#fff!important;border:1px solid #dee2e6;color:#2c3e50}
 .person-main-note{font-size:.85rem;color:#555;margin-top:8px;padding:8px 12px;background:#fff9ef;border-radius:8px;border-left:3px solid #ffc107}
-.parse-summary-row{display:flex;justify-content:space-between;padding:5px 8px;border-bottom:1px solid #eee;font-size:.82rem;gap:8px;align-items:center;cursor:pointer}
-.parse-summary-row strong{min-width:70px}
-.parse-summary-row .rowinfo{min-width:80px;font-size:.72rem;color:#adb5bd}
-.parse-summary-row .shifts{color:#666;text-align:right;flex:1}
-.parse-summary-row:hover{background:#f0f3ff}
-.detect-info{background:#e8f5e8;border-left:4px solid #28a745;padding:8px 12px;border-radius:6px;font-size:.85rem;margin-bottom:10px}
 </style>
 </head>
 <body>
@@ -87,17 +81,6 @@ body{background:#fdf8e7;font-family:'Segoe UI','Microsoft JhengHei',sans-serif;p
 </div></div>
 <div class="loading-spinner" id="loadingSpinner"><div class="spinner-border text-primary"></div><h4 class="mt-3">解析班表中...</h4></div>
 <div class="result-section" id="resultSection">
-<div class="card" id="parseSummaryCard" style="display:none">
-<div class="card-body">
-<div class="d-flex justify-content-between align-items-center mb-2">
-<h5 class="mb-0"><i class="bi bi-list-check"></i> 解析摘要 <span id="parseSummaryCount" class="badge bg-primary"></span></h5>
-<button class="btn btn-sm btn-outline-secondary" id="toggleParseSummaryBtn"><i class="bi bi-chevron-up"></i> 隱藏</button>
-</div>
-<div id="detectInfo" class="detect-info"></div>
-<div id="parseSummaryList" style="max-height:260px;overflow-y:auto"></div>
-<div class="small text-muted mt-2"><i class="bi bi-info-circle"></i> 「列」是 Excel 實際列號。「來源」表示該人員的班型從哪一行讀取（人員行 + 上一行班型）。點選可切換人員。</div>
-</div>
-</div>
 <div class="color-settings-section" id="colorSettingsSection">
 <div class="d-flex justify-content-between"><h5><i class="bi bi-palette"></i> 班型顏色設定</h5><button class="btn btn-sm btn-outline-secondary" id="toggleColorSettingsBtn"><i class="bi bi-chevron-up"></i> 隱藏</button></div>
 <div id="colorSettingsContainer"></div>
@@ -145,7 +128,6 @@ let shiftColors={...defaultShiftColors};
 let scheduleYear=2026,scheduleMonth=11,weekStartDay=0,isSummaryCollapsed=true;
 let globalSpecialShifts=new Set();
 
-function colLetter(idx){let s='';idx++;while(idx>0){let m=(idx-1)%26;s=String.fromCharCode(65+m)+s;idx=Math.floor((idx-1)/26)}return s}
 function getShiftStartMinutes(c){if(holidayShifts.includes(c))return 99999;const d=shiftDescriptions[c];if(d&&d.includes('~')){let[h,m]=d.split('~')[0].trim().split(':').map(Number);return h*60+m}return 1439}
 function getSortedShiftList(set){let w=[],h=[];for(let s of set){holidayShifts.includes(s)?h.push(s):w.push(s)}w.sort((a,b)=>getShiftStartMinutes(a)-getShiftStartMinutes(b));h.sort();return[...w,...h]}
 function refreshSpecialShifts(){let f=new Set();for(let p of scheduleData)for(let d in p.shifts){let c=p.shifts[d].shift;if(c&&!shiftDescriptions[c])f.add(c)}globalSpecialShifts=f;for(let s of f)if(!shiftColors[s])shiftColors[s]={...SPECIAL_DEFAULT_COLOR};for(let k in shiftColors)if(!shiftDescriptions[k]&&!f.has(k))delete shiftColors[k]}
@@ -159,13 +141,30 @@ let col=shiftColors[s]||{r:128,g:128,b:128},desc=shiftDescriptions[s]||(sp?'特�
 let it=document.createElement('div');it.className='color-setting-item';
 it.innerHTML=`<div class="shift-label">${s}</div><div class="time-label">${desc}</div><div class="color-preview" id="preview_${s}" style="background:rgb(${col.r},${col.g},${col.b})"></div><div class="color-input-group"><div><span class="badge bg-secondary">R</span><input type="number" min="0" max="255" class="form-control form-control-sm color-input" data-shift="${s}" data-type="r" value="${col.r}"></div><div><span class="badge bg-secondary">G</span><input type="number" min="0" max="255" class="form-control form-control-sm color-input" data-shift="${s}" data-type="g" value="${col.g}"></div><div><span class="badge bg-secondary">B</span><input type="number" min="0" max="255" class="form-control form-control-sm color-input" data-shift="${s}" data-type="b" value="${col.b}"></div></div>`;
 c.appendChild(it);
-it.querySelectorAll('.color-input').forEach(inp=>inp.addEventListener('input',()=>{let k=inp.dataset.shift,t=inp.dataset.type,v=parseInt(inp.value)||0;if(v<0)v=0;if(v>255)v=255;if(!shiftColors[k])shiftColors[k]={r:128,g:128,b:128};shiftColors[k][t]=v;document.getElementById('preview_'+k).style.backgroundColor=`rgb(${shiftColors[k].r},${shiftColors[k].g},${shiftColors[k].b})`;updateView()}))
+it.querySelectorAll('.color-input').forEach(inp=>inp.addEventListener('input',()=>{
+let k=inp.dataset.shift,t=inp.dataset.type,v=parseInt(inp.value);
+if(isNaN(v))return;
+if(v<0)v=0;if(v>255)v=255;
+if(!shiftColors[k])shiftColors[k]={r:128,g:128,b:128};
+shiftColors[k][t]=v;
+document.getElementById('preview_'+k).style.backgroundColor=`rgb(${shiftColors[k].r},${shiftColors[k].g},${shiftColors[k].b})`;
+refreshCalendarAndSummaryColors();
+}));
 }
 work.forEach(s=>add(s));if(work.length&&hol.length){let hr=document.createElement('hr');hr.style.borderTop='3px solid #f00';hr.style.margin='12px 0';c.appendChild(hr)}
 hol.forEach(s=>add(s));
 if(specials&&specials.length){let hr=document.createElement('hr');hr.style.borderTop='3px solid #f00';hr.style.margin='16px 0';c.appendChild(hr);let t=document.createElement('div');t.className='fw-bold mb-2 text-secondary';t.innerText='✨ 特殊班型';c.appendChild(t);[...specials].sort().forEach(s=>add(s,true))}
 }
-function updateView(){let v=document.getElementById('personSelect').value;if(v)showPerson()}
+
+// ★ 顏色輸入時只重繪日曆與統計，不重建顏色面板
+function refreshCalendarAndSummaryColors(){
+let n=document.getElementById('personSelect').value;
+if(!n)return;
+let p=scheduleData.find(x=>x.name===n);
+if(!p)return;
+createCalendar(p);
+createSummary(p);
+}
 
 function createSummary(p){
 const c=document.getElementById('shiftSummaryContent');if(!c)return;c.innerHTML='';
@@ -223,7 +222,8 @@ document.getElementById('personWeeklyCalendar').style.display='block';
 document.getElementById('personShiftSummary').style.display='block';
 document.getElementById('actionButtons').style.display='flex';
 createCalendar(p);createSummary(p);
-let sp=new Set();for(let d in p.shifts){let c=p.shifts[d].shift;if(c&&!shiftDescriptions[c])sp.add(c)}createColorSettings([...sp])
+let sp=new Set();for(let d in p.shifts){let c=p.shifts[d].shift;if(c&&!shiftDescriptions[c])sp.add(c)}
+createColorSettings([...sp])
 }
 
 function copySchedule(){
@@ -270,19 +270,6 @@ function isValidName(n){if(!n||typeof n!=='string')return false;let t=n.trim();i
 
 function getCell(row,c){if(!row||row[c]===null||row[c]===undefined)return'';let s=String(row[c]).trim();if(s.startsWith('='))return'';return s}
 
-function showParseSummary(firstDateCol,headerRowIdx){
-let card=document.getElementById('parseSummaryCard'),list=document.getElementById('parseSummaryList'),count=document.getElementById('parseSummaryCount'),detect=document.getElementById('detectInfo');
-if(!card||!list)return;
-card.style.display='block';count.textContent=`${scheduleData.length} 人`;
-let dim=new Date(scheduleYear,scheduleMonth,0).getDate();
-detect.innerHTML=`<i class="bi bi-check-circle"></i> 配對模式：<strong>人員行 + 上一行班型</strong>｜1 日對應 <strong>${colLetter(firstDateCol)} 欄</strong>｜表頭列為第 ${headerRowIdx+1} 列。`;
-list.innerHTML=scheduleData.map(p=>{
-let days=Object.keys(p.shifts).length,f=p.shifts[1]?.shift||'-',l=p.shifts[dim]?.shift||'-';
-return `<div class="parse-summary-row" data-name="${p.name}"><span class="rowinfo">列${p.personRow}｜${p.srcLabel}</span><span><strong>${p.name}</strong> (${p.empId})</span><span class="shifts">${days}天｜1日:${f}｜${dim}日:${l}</span></div>`
-}).join('');
-list.querySelectorAll('.parse-summary-row').forEach(row=>{row.onclick=()=>{let n=row.dataset.name;let s=document.getElementById('personSelect');s.value=n;showPerson();window.scrollTo({top:s.getBoundingClientRect().top+window.scrollY-100,behavior:'smooth'})}})
-}
-
 function updatePersonSelect(){let s=document.getElementById('personSelect');if(!s)return;s.innerHTML='<option value="">請選擇人員</option>';scheduleData.forEach(p=>{let o=document.createElement('option');o.value=p.name;o.textContent=`${p.name} (${p.empId})`;s.appendChild(o)})}
 function updateWeekStart(){let w=document.getElementById('weekStartSelector');w.style.display='block';let s=document.getElementById('weekStartDaySelect');s.value=weekStartDay;s.onchange=()=>{weekStartDay=parseInt(s.value);showPerson()}}
 function showLoading(){document.getElementById('loadingSpinner').style.display='block';document.getElementById('resultSection').style.display='none'}
@@ -311,7 +298,6 @@ if(firstDateCol<0){for(let c=0;c<hr.length;c++){if(getCell(hr,c)==='日'){firstD
 if(firstDateCol<0)firstDateCol=2;
 let maxCol=firstDateCol+dim-1;
 
-// 找出所有人員列
 let personRows=[];
 for(let r=0;r<json.length;r++){let row=json[r];if(!row)continue;let a=getCell(row,0),b=getCell(row,1);if(/^\d+$/.test(a)&&isValidName(b))personRows.push({r,empId:a,name:b})}
 
@@ -320,15 +306,15 @@ for(let i=0;i<personRows.length;i++){
 let{r,empId,name}=personRows[i];
 let personRow=json[r];
 
-// ★ 模式 B：讀上一行作為班型行
-let shiftRow=null,srcLabel='無';
+// 模式 B：讀上一行作為班型行
+let shiftRow=null;
 if(r>0){
 let prevRow=json[r-1];
 if(prevRow){
 let pa=getCell(prevRow,0),pb=getCell(prevRow,1);
 if(!/^\d+$/.test(pa)&&pb===''){
 let has=false;for(let c=firstDateCol;c<=maxCol;c++){if(getCell(prevRow,c)){has=true;break}}
-if(has){shiftRow=prevRow;srcLabel=`第${r}列`}
+if(has)shiftRow=prevRow;
 }
 }
 }
@@ -344,13 +330,12 @@ else if(mark){shiftCode=mark}
 else{shiftCode=base}
 if(shiftCode)shifts[dn]={shift:shiftCode,originalShift:shiftCode,isHoliday:holidayShifts.includes(shiftCode),note:note}
 }
-if(Object.keys(shifts).length>0)scheduleData.push({name,empId,group:'顧客機維護組',category:'所有人',shifts,mainNote:'',personRow:r+1,srcLabel})
+if(Object.keys(shifts).length>0)scheduleData.push({name,empId,group:'顧客機維護組',category:'所有人',shifts,mainNote:''})
 }
 
 if(scheduleData.length===0){showError('無效班表資料，請確認格式');return}
 refreshSpecialShifts();
 updatePersonSelect();
-showParseSummary(firstDateCol,headerRowIdx);
 hideLoading();document.getElementById('fileInfo').style.display='none';
 let ps=document.getElementById('personSelect');if(ps.options.length>1){ps.selectedIndex=1;showPerson()}
 }
@@ -368,7 +353,6 @@ addFloatCopy();
 const toggle=()=>{let p=document.getElementById('colorSettingsSection');p.style.display=p.style.display==='block'?'none':'block'};
 document.getElementById('toggleColorSettingsBtn').onclick=toggle;
 document.getElementById('toggleColorSettingsBtn2').onclick=toggle;
-document.getElementById('toggleParseSummaryBtn').onclick=()=>{let l=document.getElementById('parseSummaryList'),b=document.getElementById('toggleParseSummaryBtn');if(l.style.display==='none'){l.style.display='block';b.innerHTML='<i class="bi bi-chevron-up"></i> 隱藏'}else{l.style.display='none';b.innerHTML='<i class="bi bi-chevron-down"></i> 展開'}};
 document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files&&e.target.files[0])handleFile(e.target.files[0]);e.target.value=''});
 document.getElementById('selectFileBtn').onclick=()=>document.getElementById('fileInput').click();
 document.getElementById('uploadArea').addEventListener('click',e=>{if(e.target===document.getElementById('uploadArea')||e.target.closest('.upload-instruction'))document.getElementById('fileInput').click()});
